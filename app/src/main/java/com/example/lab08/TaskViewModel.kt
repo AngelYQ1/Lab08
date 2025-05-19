@@ -1,47 +1,60 @@
 package com.example.lab08
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.*
+import android.content.Context
 import kotlinx.coroutines.launch
 
-class TaskViewModel(private val dao: TaskDao) : ViewModel() {
+enum class SortType { NAME, DATE, STATUS }
 
-    // Estado para la lista de tareas
-    private val _tasks = MutableStateFlow<List<Task>>(emptyList())
-    val tasks: StateFlow<List<Task>> = _tasks
-    init {
-        // Al inicializar, cargamos las tareas de la base de datos
-        viewModelScope.launch {
-            _tasks.value = dao.getAllTasks()
+class TaskViewModel(context: Context) : ViewModel() {
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _sortType = MutableStateFlow(SortType.DATE)
+    val sortType: StateFlow<SortType> = _sortType.asStateFlow()
+
+    private val dao = TaskDatabase.getDatabase(context).taskDao()
+
+    val tasks = combine(searchQuery, sortType) { query, type ->
+        when (type) {
+            SortType.NAME -> dao.searchSortedByName(query)
+            SortType.DATE -> dao.searchSortedByDate(query)
+            SortType.STATUS -> dao.searchSortedByStatus(query)
         }
+    }.flatMapLatest { it }
+        .stateIn(viewModelScope,
+            SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
     }
 
-    // Función para añadir una nueva tarea
+    fun setSortType(type: SortType) {
+        _sortType.value = type
+    }
+
     fun addTask(description: String) {
-        val newTask = Task(description = description)
         viewModelScope.launch {
-            dao.insertTask(newTask)
-            _tasks.value = dao.getAllTasks() // Recargamos la lista
+            dao.insert(Task(description = description))
         }
     }
 
-    // Función para alternar el estado de completado de una tarea
     fun toggleTaskCompletion(task: Task) {
         viewModelScope.launch {
-            val updatedTask = task.copy(isCompleted = !task.isCompleted)
-            dao.updateTask(updatedTask)
-            _tasks.value = dao.getAllTasks() // Recargamos la lista
+            dao.update(task.copy(isCompleted = !task.isCompleted))
         }
     }
 
-    // Función para eliminar todas las tareas
+    fun deleteTask(task: Task) {
+        viewModelScope.launch {
+            dao.delete(task.id)
+        }
+    }
+
     fun deleteAllTasks() {
         viewModelScope.launch {
-            dao.deleteAllTasks()
-            _tasks.value = emptyList() // Vaciamos la lista en el estado
+            dao.deleteAll()
         }
     }
 }
-
-
